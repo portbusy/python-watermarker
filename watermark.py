@@ -1,95 +1,77 @@
-# Import required Image library
-from PIL import Image, ImageDraw, ImageFont
-import argparse
-from os import walk
+import logging
+import os
+from PIL import Image, UnidentifiedImageError
+
+from config import config
+
+LOGGER = logging.getLogger(__name__)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--path',
-                        help='Absolute path to the folder with the images to be watermarked.',
-                        required=True)
-    parser.add_argument('--watermark',
-                        help='Absolute path to the watermark file.',
-                        required=True)
-    parser.add_argument('--save',
-                        help='Absolute path to save the watermarked images, default is the same folder of the images',
-                        required=False)
-    parser.add_argument('--show', help='If true will show the image after applying the watermark, default false',
-                        default=False,
-                        required=False)
-    args = parser.parse_args()
-    path = args.path
-    if args.save:
-        save_path = args.save
-    else:
-        save_path = f'{path}/watermarked'
-    logo_path = args.watermark
-    show = args.show
-    skipList = ['404.png', 'default.jpg', 'logo45.png', 'logo.jpeg', 'logo45w.png', 'esp-dht.jpg']
-    images = []
-    dirs = []
-    for (dirpath, dirnames, filenames) in walk(path):
-        images.extend(filenames)
-        dirs.extend(dirnames)
-        break
+class WaterMarker:
 
-    print(images, dirnames)
+    def __init__(self, path, watermark_path, save_path, show):
+        self._path = path
+        self._watermark_path = watermark_path
+        self._save_path = save_path
+        self._show = show
+        self._images = eval(config.IMAGES.get())
+        self._dirs = eval(config.DIRS.get())
+        self._skip_list = eval(config.SKIP_LIST.get())
 
-    for image in images:
-        print(image)
-        im = Image.open(f'{path}/{image}')
-        width, height = im.size
+    def create_watermarked_image(self):
+        """
+        Create a watermarked image with the parameters found in the configuration file
+        :return:
+        :rtype:
+        """
+        filenames = next(os.walk(self._path), (None, None, []))[2]
+        for root, dirs, files in os.walk(os.path.normpath(self._path)):
+            print(root, "consumes", end="")
 
-        draw = ImageDraw.Draw(im)
-        if 'logo' in image:
-            # print(image)
-            # text = "DB"
-            # font = ImageFont.truetype('C:\Windows\Fonts\Montserrat-Bold.ttf', 10)
-            # textwidth, textheight = draw.textsize(text, font)
-            #
-            # # calculate the x,y coordinates of the text
-            # margin = 5
-            # x = width - textwidth - margin
-            # y = height - textheight - margin
-            # if 'w.png' in image:
-            #     color = '#000000'
-            # else:
-            #     color = '#ffffff'
-            # # draw watermark in the bottom right corner
-            # draw.text((x, y), text, font=font, fill=color)
-            # im.show()
-            # im.save(f'C:/Users/bertolottida/Desktop/img/{image}')
-            pass
+            print("bytes in", len(files), "non-directory files")
+            self._images.extend(files)
+            self._dirs.extend(dirs)
+        LOGGER.debug(f'Images: {self._images}, Directories: {self._dirs}, {filenames}')
 
-        else:
+        for image in self._images:
             try:
-                if image not in skipList:
-                    watermark = Image.open(logo_path).convert('RGBA');
-                    mask = watermark.convert('L').point(lambda x: min(x, 8))
-                    watermark.putalpha(mask)
-
-                    watermark_width, watermark_height = watermark.size
-                    main_width, main_height = im.size
-                    aspect_ratio = watermark_width / watermark_height
-                    new_watermark_width = main_width * 0.25
-                    watermark.thumbnail((new_watermark_width, new_watermark_width / aspect_ratio), Image.ANTIALIAS)
-
-                    tmp_img = Image.new('RGB', im.size)
-                    for i in range(0, tmp_img.size[0], watermark.size[0]):
-                        for j in range(0, tmp_img.size[1], watermark.size[1]):
-                            im.paste(watermark, (i, j), watermark)
-                            im.thumbnail((8000, 8000), Image.ANTIALIAS)
-                            im.save(f'{save_path}/{image}', quality=100)
-                    # add watermark to your image
-                    if show:
-                        im.show()
-                else:
-                    print('passed')
+                im = Image.open(f'{self._path}/{image}')
+                if 'logo' in image:
+                    # TODO: add custom text to the image
+                    """
+                    width, height = im.size
+    
+                    draw = ImageDraw.Draw(im)
+                    """
                     pass
-            except:
-                pass
+                else:
+                    if image not in self._skip_list:
+                        watermark = Image.open(self._watermark_path).convert('RGBA')
+                        mask = watermark.convert('L').point(lambda x: min(x, 8))
+                        watermark.putalpha(mask)
 
+                        watermark_width, watermark_height = watermark.size
+                        main_width, main_height = im.size
+                        aspect_ratio = watermark_width / watermark_height
+                        new_watermark_width = main_width * 0.25
+                        watermark.thumbnail((new_watermark_width, new_watermark_width / aspect_ratio), Image.ANTIALIAS)
+                        if not os.path.exists(self._save_path):
+                            os.makedirs(self._save_path)
+                        tmp_img = Image.new('RGB', im.size)
+                        for i in range(0, tmp_img.size[0], watermark.size[0]):
+                            for j in range(0, tmp_img.size[1], watermark.size[1]):
+                                im.paste(watermark, (i, j), watermark)
+                                im.thumbnail((8000, 8000), Image.ANTIALIAS)
+                                im.save(f'{self._save_path}/{image}', quality=100)
+                        # add watermark to your image
+                        if self._show:
+                            im.show()
+                    else:
+                        LOGGER.warning(f'Image {image} in skip list, moving to the next one')
+                        pass
+            except UnidentifiedImageError:
+                LOGGER.error(f'Cannot open image {image}: invalid format')
+            except Exception as e:
+                LOGGER.error(f'Error while watermarking the image {image}: {e}')
 
-if __name__ == '__main__':
-    main()
+        LOGGER.info(f'All watermarked images saved to {self._save_path}')
